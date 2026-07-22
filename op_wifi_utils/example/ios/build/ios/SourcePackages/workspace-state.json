@@ -1,0 +1,27 @@
+{
+  "object" : {
+    "artifacts" : [
+
+    ],
+    "dependencies" : [
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "integration_test",
+          "kind" : "fileSystem",
+          "location" : "/Users/davide/work/freelancer/reusables/flutter-packages/op_wifi_utils/example/ios/Flutter/ephemeral/Packages/.packages/integration_test",
+          "name" : "integration_test"
+        },
+        "state" : {
+          "name" : "fileSystem",
+          "path" : "/Users/davide/work/freelancer/reusables/flutter-packages/op_wifi_utils/example/ios/Flutter/ephemeral/Packages/.packages/integration_test"
+        },
+        "subpath" : "integration_test"
+      }
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}
