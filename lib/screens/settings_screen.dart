@@ -9,7 +9,6 @@ import 'theme_page.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
-
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -22,7 +21,6 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
     _checkWifiState();
     _wifiSub = WiFiChannel.onWifiChanged.listen((_) {
       _checkWifiState();
@@ -51,17 +49,16 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     }
   }
 
-  // --- Build ---
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Настройки'),
       ),
-      body: ValueListenableBuilder<FogelSettings>(
-        valueListenable: globalSettings,
-        builder: (context, settings, child) {
+      body: ListenableBuilder(
+        listenable: Listenable.merge([globalSettings, AdapterConnectPage.scanState]),
+        builder: (context, child) {
+          final settings = globalSettings.value;
           return Scrollbar(
             controller: _scrollController,
             thumbVisibility: true,
@@ -90,7 +87,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   Widget _buildAdapterCard(FogelSettings settings) {
     final wifiOn = settings.wifiEnabled;
     final status = settings.connectionStatus;
-    final isConnected = status == 'connected';
+    final isConnected = status == FogelConnectionState.connected;
     final isBusy = settings.isConnecting && !isConnected;
 
     IconData icon;
@@ -108,28 +105,38 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     } else if (isBusy) {
       icon = Icons.sync;
       iconColor = Colors.orange;
-      if (status == 'connecting') {
-        subtitle = 'Подключение к адаптеру…';
-      } else if (status == 'pinging') {
-        subtitle = 'Проверка адаптера…';
+      if (status == FogelConnectionState.connecting) {
+        subtitle = 'Подключение к адаптеру...';
+      } else if (status == FogelConnectionState.pinging) {
+        subtitle = 'Проверка адаптера...';
       } else {
-        subtitle = 'Загрузка конфигурации…';
+        subtitle = 'Загрузка конфигурации...';
+      }
+    } else if (adapterPageIsScanning) {
+      icon = Icons.wifi_find;
+      iconColor = Colors.blue;
+      if (adapterPageFoundCount > 0) {
+        subtitle = 'Найдено адаптеров: $adapterPageFoundCount';
+      } else {
+        subtitle = 'Поиск...';
       }
     } else {
       icon = Icons.wifi_off;
       iconColor = Colors.orange;
-      subtitle = 'Адаптер не подключён';
+      subtitle = 'Не подключен';
     }
+
+    final showSpinner = wifiOn && (isBusy || adapterPageIsScanning);
 
     return Card(
       child: ListTile(
-        leading: isBusy
+        leading: showSpinner
             ? SizedBox(
                 width: 24,
                 height: 24,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.5,
-                  color: iconColor,
+                  color: adapterPageIsScanning ? Colors.blue : iconColor,
                 ),
               )
             : Icon(icon, color: iconColor),
@@ -137,13 +144,13 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         subtitle: Text(subtitle),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => Navigator.push(context, PageRouteBuilder(
-      opaque: false,
-      pageBuilder: (context, animation, secondaryAnimation) => const AdapterConnectPage(),
-      transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(
-        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
-        child: child,
-      ),
-          )),
+          opaque: false,
+          pageBuilder: (context, animation, secondaryAnimation) => const AdapterConnectPage(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(
+            opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+            child: child,
+          ),
+        )),
         onLongPress: isConnected ? () => _showDisconnectDialog(settings) : null,
       ),
     );
@@ -179,9 +186,8 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 FogelAdapterService().disconnect(manual: true, disconnectWifi: true);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text('Устройство отключено'),
-                      backgroundColor: Theme.of(context).colorScheme.primary,
+                    const SnackBar(
+                      content: Text('Адаптер отключен')
                     ),
                   );
                 }

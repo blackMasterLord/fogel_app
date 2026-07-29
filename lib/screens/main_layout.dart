@@ -18,7 +18,7 @@ class MainLayout extends StatefulWidget {
 class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   int _currentIndex = 0;
   late PageController _pageController;
-  String _lastStatus = 'disconnected';
+  FogelConnectionState _lastStatus = FogelConnectionState.disconnected;
 
   final List<Widget> _tabs = [
     const CanAnalyzerTab(),
@@ -61,7 +61,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     try {
       if (service.canReconnect && service.isConnectionStale) {
         debugPrint('[MainLayout] UDP stale after resume, reconnecting...');
-        globalSettings.value = globalSettings.value.copyWith(connectionStatus: 'reconnecting');
+        globalSettings.value = globalSettings.value.copyWith(connectionStatus: FogelConnectionState.reconnecting);
         service.markReconnecting();
 
         final ok = await service.reconnect().timeout(
@@ -74,7 +74,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
 
         if (!ok && mounted) {
           globalSettings.value = globalSettings.value.copyWith(
-            connectionStatus: 'disconnected',
+            connectionStatus: FogelConnectionState.disconnected,
             connectionError: 'Таймаут переподключения к адаптеру',
           );
         }
@@ -86,14 +86,13 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
 
   void _onGlobalSettingsChanged() {
     final currentStatus = globalSettings.value.connectionStatus;
-    if (_lastStatus == 'connected' && currentStatus == 'disconnected') {
+    if (_lastStatus == FogelConnectionState.connected && currentStatus == FogelConnectionState.disconnected) {
       if (!FogelAdapterService().isManualDisconnect && !FogelAdapterService().isAutoReconnecting) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Связь с адаптером потеряна'),
               backgroundColor: Colors.red,
-              duration: Duration(seconds: 4),
             ),
           );
         }
@@ -107,7 +106,6 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
         SnackBar(
           content: Text(error),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 4),
         ),
       );
       globalSettings.value = globalSettings.value.copyWith(connectionError: null);
@@ -165,16 +163,17 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
+        //backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
         currentIndex: _currentIndex,
         selectedFontSize: 12.0,
         unselectedFontSize: 12.0,
-        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal),
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
         unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal),
         onTap: (index) {
           _pageController.animateToPage(
             index,
-            duration: const Duration(milliseconds: 350),
-            curve: Curves.easeInOut,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOut,
           );
         },
         items: const [

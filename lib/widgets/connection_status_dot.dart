@@ -10,39 +10,15 @@ class ConnectionStatusDot extends StatefulWidget {
 
 class _ConnectionStatusDotState extends State<ConnectionStatusDot> with SingleTickerProviderStateMixin {
   late AnimationController _blinkController;
-  bool _shouldBlink = false;
 
   @override
   void initState() {
     super.initState();
-    _blinkController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    // Listen to connection status changes and manage animation separately
-    // from build() — avoids side effects in a pure rendering function.
-    globalSettings.addListener(_onConnectionStatusChanged);
-    _syncBlink(globalSettings.value.connectionStatus);
-  }
-
-  void _onConnectionStatusChanged() {
-    _syncBlink(globalSettings.value.connectionStatus);
-  }
-
-  void _syncBlink(String status) {
-    final shouldBlink = status == 'searching' || status == 'connecting' || status == 'reconnecting';
-    _shouldBlink = shouldBlink;
-    if (shouldBlink && !_blinkController.isAnimating) {
-      _blinkController.repeat(reverse: true);
-    } else if (!shouldBlink && _blinkController.isAnimating) {
-      _blinkController.stop();
-      _blinkController.value = 1.0;
-    }
+    _blinkController = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
   }
 
   @override
   void dispose() {
-    globalSettings.removeListener(_onConnectionStatusChanged);
     _blinkController.dispose();
     super.dispose();
   }
@@ -52,45 +28,38 @@ class _ConnectionStatusDotState extends State<ConnectionStatusDot> with SingleTi
     return ValueListenableBuilder<FogelSettings>(
       valueListenable: globalSettings,
       builder: (context, settings, child) {
-        Color dotColor;
+        final status = settings.connectionStatus;
+        final shouldBlink = status == FogelConnectionState.connecting || status == FogelConnectionState.reconnecting;
 
-        switch (settings.connectionStatus) {
-          case 'connected':
+        if (shouldBlink && !_blinkController.isAnimating) {
+          _blinkController.repeat(reverse: true);
+        } else if (!shouldBlink && _blinkController.isAnimating) {
+          _blinkController.stop();
+          _blinkController.value = 1.0;
+        }
+
+        Color dotColor;
+        switch (status) {
+          case FogelConnectionState.connected:
             dotColor = Colors.greenAccent;
-            break;
-          case 'searching':
-          case 'connecting':
-          case 'reconnecting':
+          case FogelConnectionState.connecting:
+          case FogelConnectionState.pinging:
+          case FogelConnectionState.loadingConfig:
+          case FogelConnectionState.reconnecting:
             dotColor = Colors.amberAccent;
-            break;
-          default:
+          case FogelConnectionState.disconnected:
             dotColor = Colors.redAccent;
-            break;
         }
 
         Widget dot = Container(
-          width: 8,
-          height: 8,
+          width: 8, height: 8,
           decoration: BoxDecoration(
-            color: dotColor,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: dotColor.withValues(alpha: 0.6),
-                blurRadius: 4,
-                spreadRadius: 1,
-              ),
-            ],
+            color: dotColor, shape: BoxShape.circle,
+            boxShadow: [BoxShadow(color: dotColor.withValues(alpha: 0.6), blurRadius: 4, spreadRadius: 1)],
           ),
         );
 
-        if (_shouldBlink) {
-          return FadeTransition(
-            opacity: _blinkController,
-            child: dot,
-          );
-        }
-
+        if (shouldBlink) return FadeTransition(opacity: _blinkController, child: dot);
         return dot;
       },
     );

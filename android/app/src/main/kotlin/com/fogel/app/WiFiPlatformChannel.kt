@@ -4,6 +4,10 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.Manifest
+import android.util.Log
+import androidx.core.content.ContextCompat
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -86,12 +90,16 @@ class WiFiPlatformChannel(private val context: Context) {
         )
     }
 
-    @Suppress("DEPRECATION")
     private fun getGatewayIp(): String? {
         val dhcp = wifiManager.dhcpInfo ?: return null
         val ip = dhcp.gateway
         if (ip == 0) return null
         return "${ip and 0xFF}.${(ip shr 8) and 0xFF}.${(ip shr 16) and 0xFF}.${(ip shr 24) and 0xFF}"
+    }
+
+    // Manual signal level calculation — replaces deprecated WifiManager.calculateSignalLevel (API 31+)
+    private fun calculateSignalLevel(rssi: Int): Int {
+        return when { rssi >= -50 -> 5; rssi >= -60 -> 4; rssi >= -70 -> 3; rssi >= -80 -> 2; rssi >= -90 -> 1; else -> 0 }
     }
 
     private fun openWifiSettings() {
@@ -101,7 +109,6 @@ class WiFiPlatformChannel(private val context: Context) {
         context.startActivity(intent)
     }
 
-    @Suppress("DEPRECATION")
     private fun getConnectedSSID(): String? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val network = connectivityManager.activeNetwork ?: return null
@@ -119,6 +126,7 @@ class WiFiPlatformChannel(private val context: Context) {
             }
         }
 
+        @Suppress("DEPRECATION")
         val connectionInfo = wifiManager.connectionInfo
         if (connectionInfo.networkId == -1) return null
 
@@ -127,14 +135,13 @@ class WiFiPlatformChannel(private val context: Context) {
         return ssid.removeSurrounding("\"")
     }
 
+    @Suppress("DEPRECATION")
     private fun isWifiEnabled(): Boolean {
-        @Suppress("DEPRECATION")
         return wifiManager.isWifiEnabled
     }
 
     private fun enableWifi() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            @Suppress("DEPRECATION")
             wifiManager.isWifiEnabled = true
         } else {
             showWifiPanel()
@@ -192,10 +199,11 @@ class WiFiPlatformChannel(private val context: Context) {
         }
 
         wifiStateReceiver = receiver
-        context.applicationContext.registerReceiver(
-            receiver,
-            IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION)
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            context.applicationContext.registerReceiver(receiver, IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION), Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.applicationContext.registerReceiver(receiver, IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION))
+        }
 
         mainHandler.postDelayed({
             try {
@@ -208,62 +216,71 @@ class WiFiPlatformChannel(private val context: Context) {
     }
 
     private fun scanNetworks(result: MethodChannel.Result) {
-        val scanSuccess = @Suppress("DEPRECATION") wifiManager.startScan()
+        val hasLocation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        } else true
+        val hasNearby = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
+        } else true
+        Log.d("WiFiChannel", "[SCAN-NATIVE] startScan: hasLocation=$hasLocation hasNearby=$hasNearby sdk=${Build.VERSION.SDK_INT}")
+
+        // When already connected to a network, use cached results to avoid
+        // interrupting the active WiFi connection (startScan can cause brief drops).
+        val connectedSsid = getConnectedSSID()
+        if (connectedSsid != null && connectedSsid.isNotEmpty()) {
+            Log.d("WiFiChannel", "[SCAN-NATIVE] connected to $connectedSsid, returning cached results")
+            @Suppress("DEPRECATION")
+            val cached = wifiManager.scanResults?.map {
+                mapOf(
+                    "ssid" to (it.SSID ?: ""),
+                    "bssid" to (it.BSSID ?: ""),
+                    "signalLevel" to calculateSignalLevel(it.level),
+                    "capabilities" to (it.capabilities ?: "")
+                )
+            } ?: emptyList()
+            result.success(cached)
+            return
+        }
+
+        // registerScanResultsCallback — not deprecated (API 28+)
+        val scanSuccess = wifiManager.startScan()
+        Log.d("WiFiChannel", "[SCAN-NATIVE] startScan returned $scanSuccess")
         if (!scanSuccess) {
             result.success(emptyList<Map<String, Any?>>())
             return
         }
 
-        val timeout = 4000L
-        val startTime = System.currentTimeMillis()
         val resultSent = AtomicBoolean(false)
-
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context, intent: Intent) {
-                if (intent.action == WifiManager.SCAN_RESULTS_AVAILABLE_ACTION) {
-                    try {
-                        context.applicationContext.unregisterReceiver(this)
-                    } catch (_: Exception) {}
-
-                    if (!resultSent.getAndSet(true)) {
-                        val scanResults = @Suppress("DEPRECATION") wifiManager.scanResults
-                        val networks = scanResults?.map { scanResult ->
-                            mapOf(
-                                "ssid" to (scanResult.SSID ?: ""),
-                                "bssid" to (scanResult.BSSID ?: ""),
-                                "signalLevel" to WifiManager.calculateSignalLevel(scanResult.level, 5),
-                                "capabilities" to (scanResult.capabilities ?: ""),
-                            )
-                        } ?: emptyList()
-                        result.success(networks)
-                    }
-                }
-            }
-        }
-
-        context.applicationContext.registerReceiver(
-            receiver,
-            IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION)
-        )
-
-        mainHandler.postDelayed({
-            try {
-                context.applicationContext.unregisterReceiver(receiver)
-            } catch (_: Exception) {}
-
-            if (!resultSent.getAndSet(true)) {
-                val scanResults = @Suppress("DEPRECATION") wifiManager.scanResults
-                val networks = scanResults?.map { sr ->
+        val callback = object : WifiManager.ScanResultsCallback() {
+            override fun onScanResultsAvailable() {
+                if (!resultSent.getAndSet(true)) return
+                wifiManager.unregisterScanResultsCallback(this)
+                @Suppress("DEPRECATION")
+                val networks = wifiManager.scanResults?.map {
                     mapOf(
-                        "ssid" to (sr.SSID ?: ""),
-                        "bssid" to (sr.BSSID ?: ""),
-                        "signalLevel" to WifiManager.calculateSignalLevel(sr.level, 5),
-                        "capabilities" to (sr.capabilities ?: ""),
+                        "ssid" to (it.SSID ?: ""),
+                        "bssid" to (it.BSSID ?: ""),
+                        "signalLevel" to calculateSignalLevel(it.level),
+                        "capabilities" to (it.capabilities ?: ""),
                     )
                 } ?: emptyList()
                 result.success(networks)
             }
-        }, timeout)
+        }
+        wifiManager.registerScanResultsCallback(executor, callback)
+
+        mainHandler.postDelayed({
+            wifiManager.unregisterScanResultsCallback(callback)
+            if (!resultSent.getAndSet(true)) {
+                @Suppress("DEPRECATION")
+                val cached = wifiManager.scanResults?.map {
+                    mapOf("ssid" to (it.SSID ?: ""), "bssid" to (it.BSSID ?: ""),
+                          "signalLevel" to calculateSignalLevel(it.level),
+                          "capabilities" to (it.capabilities ?: ""))
+                } ?: emptyList()
+                result.success(cached)
+            }
+        }, 4000L)
     }
 
     private fun startNetworkCallback() {

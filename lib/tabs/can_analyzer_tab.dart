@@ -182,7 +182,7 @@ class _CanAnalyzerTabState extends State<CanAnalyzerTab> {
     return ValueListenableBuilder<FogelSettings>(
       valueListenable: globalSettings,
       builder: (context, settings, _) {
-        final isConnected = settings.connectionStatus == 'connected';
+        final isConnected = settings.connectionStatus == FogelConnectionState.connected;
         final isAutoDetecting = settings.isAutoDetecting;
 
         return Column(

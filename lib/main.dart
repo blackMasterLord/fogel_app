@@ -2,11 +2,11 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_master/permission_master.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'models/fogel_settings.dart';
 import 'screens/main_layout.dart';
 import 'services/fogel_adapter_service.dart';
-import 'services/wifi_channel.dart';
 import 'utils/crash_log.dart';
 
 Future<void> _writeCrashLog(String text) async {
@@ -43,20 +43,28 @@ void main() async {
     themeSetting: savedTheme,
   );
 
+  // Init secure storage, crash log, etc.
+  await initCrashLog();
+
   await FogelAdapterService.loadSavedDevices();
 
   // Precache logo so About page shows it instantly on first visit
   try { await rootBundle.load('assets/logo.webp'); } catch (_) {}
 
-  // Eager-init DHCP EventChannel so native sink is ready before any connectToWifi call
-  WiFiChannel.onDhcpReady;
+  // Activate split notifiers (Stage 4)
+  initSplitNotifiers();
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]).then((_) {
-    runApp(const FogelApp());
-  });
+  ]);
+
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarDividerColor: Colors.transparent,
+    systemNavigationBarContrastEnforced: false,
+  ));
+
+  runApp(const FogelApp());
 }
 
 class FogelApp extends StatelessWidget {
@@ -64,6 +72,7 @@ class FogelApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    PermissionMaster.setContext(context);
     return ValueListenableBuilder<FogelSettings>(
       valueListenable: globalSettings,
       builder: (context, settings, child) {

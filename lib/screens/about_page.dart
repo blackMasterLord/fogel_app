@@ -50,7 +50,9 @@ class _AboutPageState extends State<AboutPage> {
       if (!file.existsSync()) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Файл логов не найден')),
+            const SnackBar(
+              content: Text('Файл логов не найден'),
+            ),
           );
         }
         return;
@@ -62,7 +64,10 @@ class _AboutPageState extends State<AboutPage> {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка: $e')),
+          SnackBar(
+            content: Text('Ошибка: $e'), 
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -94,13 +99,18 @@ class _AboutPageState extends State<AboutPage> {
         }
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Логи очищены')),
+            const SnackBar(
+              content: Text('Логи очищены'),
+            ),
           );
         }
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Ошибка: $e')),
+            SnackBar(
+              content: Text('Ошибка: $e'), 
+              backgroundColor: Colors.red,
+            ),
           );
         }
       }

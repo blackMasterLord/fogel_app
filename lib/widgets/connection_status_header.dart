@@ -2,16 +2,36 @@ import 'package:flutter/material.dart';
 import '../models/fogel_settings.dart';
 import '../screens/adapter_connect_page.dart';
 
-class ConnectionStatusHeader extends StatelessWidget {
+class ConnectionStatusHeader extends StatefulWidget {
   const ConnectionStatusHeader({super.key});
+
+  @override
+  State<ConnectionStatusHeader> createState() => _ConnectionStatusHeaderState();
+}
+
+class _ConnectionStatusHeaderState extends State<ConnectionStatusHeader> {
+  bool _isNavigating = false;
+
+  void _openAdapterPage() {
+    if (_isNavigating) return;
+    _isNavigating = true;
+    Navigator.push(context, PageRouteBuilder(
+      opaque: false,
+      pageBuilder: (context, animation, secondaryAnimation) => const AdapterConnectPage(),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+        child: child,
+      ),
+    )).then((_) { if (mounted) _isNavigating = false; });
+  }
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<FogelSettings>(
       valueListenable: globalSettings,
       builder: (context, settings, child) {
-        final isConnected = settings.connectionStatus == 'connected';
-        final isReconnecting = settings.connectionStatus == 'reconnecting';
+        final isConnected = settings.connectionStatus == FogelConnectionState.connected;
+        final isReconnecting = settings.connectionStatus == FogelConnectionState.reconnecting;
         final showBanner = !isConnected;
 
         return AnimatedAlign(
@@ -24,18 +44,7 @@ class ConnectionStatusHeader extends StatelessWidget {
             opacity: showBanner ? 1.0 : 0.0,
             child: ClipRect(
               child: InkWell(
-                onTap: isConnected
-                    ? null
-                    : () {
-                        Navigator.push(context, PageRouteBuilder(
-                          opaque: false,
-                          pageBuilder: (context, animation, secondaryAnimation) => const AdapterConnectPage(),
-                          transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(
-                            opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
-                            child: child,
-                          ),
-                        ));
-                      },
+                onTap: isConnected ? null : _openAdapterPage,
                 child: Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
@@ -48,25 +57,30 @@ class ConnectionStatusHeader extends StatelessWidget {
                         const Padding(
                           padding: EdgeInsets.only(right: 10),
                           child: SizedBox(
-                            width: 16, height: 16,
+                            width: 24, height: 24,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange),
                           ),
                         )
                       else
-                        const Icon(Icons.wifi_off, color: Colors.red),
+                        const Padding(
+                          padding: EdgeInsets.only(right: 10),
+                          child: SizedBox(
+                            child: Icon(Icons.wifi_off, color: Colors.red),
+                          ),
+                        ),
                       Expanded(
                         child: Text(
-                          isReconnecting ? 'Переподключение...' : 'Адаптер не подключен.',
+                          isReconnecting ? 'Переподключение...' : 'Адаптер не подключен',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: isReconnecting ? Colors.orange[800] : Colors.red[800],
+                            color: isReconnecting ? Colors.orange : Colors.red,
                           ),
                         ),
                       ),
                       Icon(
                         Icons.chevron_right,
-                        color: isReconnecting ? Colors.orange[800] : Colors.red[800],
-                        size: 20,
+                        color: isReconnecting ? Colors.orange : Colors.red,
+                        size: 24,
                       ),
                     ],
                   ),

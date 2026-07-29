@@ -14,7 +14,7 @@ class _MonitoringControlTabState extends State<MonitoringControlTab> {
   final FogelAdapterService _adapter = FogelAdapterService();
 
   // Track state changes to avoid unconditional setState on every TICK
-  String _lastConnectionStatus = 'disconnected';
+  FogelConnectionState _lastConnectionStatus = FogelConnectionState.disconnected;
   bool _lastIsAutoDetecting = false;
   bool _lastIsLoadingProtocol = false;
 
@@ -58,7 +58,7 @@ class _MonitoringControlTabState extends State<MonitoringControlTab> {
   @override
   Widget build(BuildContext context) {
     final settings = globalSettings.value;
-    final isConnected = settings.connectionStatus == 'connected';
+    final isConnected = settings.connectionStatus == FogelConnectionState.connected;
     final hasProtocol = settings.selectedProtocol != null;
     final showData = isConnected && hasProtocol;
     final isLoadingProto = _adapter.isLoadingProtocol.value;

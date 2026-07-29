@@ -2,27 +2,39 @@ import 'package:flutter/foundation.dart';
 
 enum AppThemeSetting { light, dark, system }
 
+enum FogelConnectionState { disconnected, connecting, pinging, loadingConfig, connected, reconnecting }
+
 class SavedDevice {
   final String address;
   final String name;
-  final String password;
+  final String security;
+  final bool autoConnect;
+  final DateTime lastConnectedTimestamp;
 
   SavedDevice({
     required this.address,
     required this.name,
-    required this.password,
-  });
+    this.security = 'WPA2',
+    this.autoConnect = false,
+    DateTime? lastConnectedTimestamp,
+  }) : lastConnectedTimestamp = lastConnectedTimestamp ?? DateTime.now();
 
   Map<String, dynamic> toJson() => {
     'address': address,
     'name': name,
-    'password': password,
+    'security': security,
+    'autoConnect': autoConnect,
+    'lastConnectedTimestamp': lastConnectedTimestamp.toIso8601String(),
   };
 
   factory SavedDevice.fromJson(Map<String, dynamic> json) => SavedDevice(
     address: json['address'],
     name: json['name'],
-    password: json['password'],
+    security: json['security'] ?? 'WPA2',
+    autoConnect: json['autoConnect'] ?? false,
+    lastConnectedTimestamp: json['lastConnectedTimestamp'] != null
+        ? DateTime.tryParse(json['lastConnectedTimestamp']) ?? DateTime.now()
+        : DateTime.now(),
   );
 }
 
@@ -154,16 +166,16 @@ final ValueNotifier<CanStats> canStatsNotifier = ValueNotifier(const CanStats())
 
 class FogelSettings {
   final AppThemeSetting themeSetting;
-  final String connectionStatus;
+  final FogelConnectionState connectionStatus;
 
   bool get isConnecting =>
-      connectionStatus == 'connecting' ||
-      connectionStatus == 'pinging' ||
-      connectionStatus == 'loading_config' ||
-      connectionStatus == 'reconnecting';
+      connectionStatus == FogelConnectionState.connecting ||
+      connectionStatus == FogelConnectionState.pinging ||
+      connectionStatus == FogelConnectionState.loadingConfig ||
+      connectionStatus == FogelConnectionState.reconnecting;
 
   bool get isConnectedOrConnecting =>
-      connectionStatus == 'connected' || isConnecting;
+      connectionStatus == FogelConnectionState.connected || isConnecting;
   final int? canSpeed;
   final int canSpeedDefault;
   final bool hasAutoSpeed;
@@ -195,7 +207,7 @@ class FogelSettings {
   FogelSettings({
     this.themeSetting = AppThemeSetting.system,
     this.wifiEnabled = false,
-    this.connectionStatus = 'disconnected',
+    this.connectionStatus = FogelConnectionState.disconnected,
     this.canSpeed,
     this.canSpeedDefault = 250,
     this.hasAutoSpeed = false,
@@ -218,7 +230,7 @@ class FogelSettings {
 
   FogelSettings copyWith({
     AppThemeSetting? themeSetting,
-    String? connectionStatus,
+    FogelConnectionState? connectionStatus,
     int? canSpeed,
     int? canSpeedDefault,
     bool? hasAutoSpeed,
@@ -271,3 +283,78 @@ class FogelSettings {
 }
 
 final ValueNotifier<FogelSettings> globalSettings = ValueNotifier(FogelSettings());
+
+// Keep split notifiers in sync with globalSettings
+void _syncNotifiers() {
+  final s = globalSettings.value;
+  _connectionNotifier.value = _ConnectionState(
+    status: s.connectionStatus, connectionError: s.connectionError,
+    passwordError: s.passwordError, authAttemptsLeft: s.authAttemptsLeft,
+    wifiEnabled: s.wifiEnabled,
+    connectedDeviceAddress: s.connectedDeviceAddress, connectedDeviceName: s.connectedDeviceName,
+  );
+  _canConfigNotifier.value = _CanConfig(
+    canSpeed: s.canSpeed, availableProtocols: s.availableProtocols,
+    selectedProtocol: s.selectedProtocol, protocolParams: s.protocolParams,
+    protocolCommands: s.protocolCommands, canNodes: s.canNodes,
+  );
+  _appSettingsNotifier.value = _AppSettings(themeSetting: s.themeSetting, savedDevices: s.savedDevices);
+}
+// Eager init listener
+void initSplitNotifiers() {
+  _syncNotifiers();
+  globalSettings.addListener(_syncNotifiers);
+}
+
+// --- Split notifiers (Stage 4) — subscribe only to what you need ---
+
+final _connectionNotifier = ValueNotifier(const _ConnectionState());
+
+class _ConnectionState {
+  final FogelConnectionState status;
+  final String? connectionError;
+  final String? passwordError;
+  final int authAttemptsLeft;
+  final bool wifiEnabled;
+  final String connectedDeviceAddress;
+  final String connectedDeviceName;
+  const _ConnectionState({
+    this.status = FogelConnectionState.disconnected,
+    this.connectionError,
+    this.passwordError,
+    this.authAttemptsLeft = 5,
+    this.wifiEnabled = false,
+    this.connectedDeviceAddress = '',
+    this.connectedDeviceName = '',
+  });
+}
+
+final _canConfigNotifier = ValueNotifier(const _CanConfig());
+
+class _CanConfig {
+  final int? canSpeed;
+  final List<String> availableProtocols;
+  final String? selectedProtocol;
+  final List<String> protocolParams;
+  final List<String> protocolCommands;
+  final List<dynamic> canNodes;
+  const _CanConfig({
+    this.canSpeed,
+    this.availableProtocols = const [],
+    this.selectedProtocol,
+    this.protocolParams = const [],
+    this.protocolCommands = const [],
+    this.canNodes = const [],
+  });
+}
+
+final _appSettingsNotifier = ValueNotifier(const _AppSettings());
+
+class _AppSettings {
+  final AppThemeSetting themeSetting;
+  final List<SavedDevice> savedDevices;
+  const _AppSettings({
+    this.themeSetting = AppThemeSetting.system,
+    this.savedDevices = const [],
+  });
+}

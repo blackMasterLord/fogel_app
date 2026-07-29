@@ -26,7 +26,7 @@ class _LightningIconWithParticlesState extends State<LightningIconWithParticles>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 250),
     )..addListener(() {
         _updateStrike();
       });
