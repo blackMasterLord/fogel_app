@@ -6,7 +6,11 @@ import android.net.NetworkRequest
 import android.net.NetworkCapabilities
 import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
+import android.net.wifi.WifiConfiguration
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.core.app.ActivityCompat
@@ -24,6 +28,7 @@ import io.flutter.plugin.common.EventChannel
 import java.util.concurrent.atomic.AtomicBoolean
 import android.net.Network
 import android.net.LinkProperties
+import android.net.NetworkInfo
 
 class OpWifiUtilsPlugin : FlutterPlugin, MethodCallHandler {
   private lateinit var context: Context
@@ -73,6 +78,8 @@ class OpWifiUtilsPlugin : FlutterPlugin, MethodCallHandler {
   }
 
   private var activeCallback: ConnectivityManager.NetworkCallback? = null
+  private var legacyNetworkId: Int = -1
+  private var legacyReceiver: BroadcastReceiver? = null
 
   private fun hasWifiPermission(): Boolean {
     val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.NEARBY_WIFI_DEVICES
@@ -83,10 +90,27 @@ class OpWifiUtilsPlugin : FlutterPlugin, MethodCallHandler {
     return false
   }
 
-  private fun connectToWifi(ssid: String, password: String?, bssid: String?, result: Result) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) { result.error("UNSUPPORTED", "Only Android 10+ is supported", null); return }
-    if (!hasWifiPermission()) { result.error("PERMISSION_REQUIRED", "NEARBY_WIFI_DEVICES or ACCESS_FINE_LOCATION permission required", null); return }
+  // =========================================================================
+  // Unified connectToWifi — branches by SDK
+  // =========================================================================
 
+  private fun connectToWifi(ssid: String, password: String?, bssid: String?, result: Result) {
+    if (!hasWifiPermission()) {
+      result.error("PERMISSION_REQUIRED", "NEARBY_WIFI_DEVICES or ACCESS_FINE_LOCATION permission required", null)
+      return
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      connectWithSpecifier(ssid, password, bssid, result)
+    } else {
+      connectWithLegacy(ssid, password, bssid, result)
+    }
+  }
+
+  // =========================================================================
+  // SpecifierConnectionStrategy (API 29+)
+  // =========================================================================
+
+  private fun connectWithSpecifier(ssid: String, password: String?, bssid: String?, result: Result) {
     try {
       val builder = WifiNetworkSpecifier.Builder().setSsid(ssid)
       if (!bssid.isNullOrEmpty()) builder.setBssid(android.net.MacAddress.fromString(bssid))
@@ -95,6 +119,7 @@ class OpWifiUtilsPlugin : FlutterPlugin, MethodCallHandler {
 
       val networkRequest = NetworkRequest.Builder()
         .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+        .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         .setNetworkSpecifier(wifiSpecifier)
         .build()
 
@@ -127,19 +152,136 @@ class OpWifiUtilsPlugin : FlutterPlugin, MethodCallHandler {
       connectivityManager?.requestNetwork(networkRequest, callback)
       activeCallback = callback
     } catch (e: Exception) {
-      Log.e("OpWifiUtils", "Unexpected exception in connectToWifi: $e")
+      Log.e("OpWifiUtils", "Specifier error: $e")
       Handler(Looper.getMainLooper()).post { result.error("EXCEPTION", "Unexpected error: ${e.localizedMessage}", null) }
     }
   }
 
+  // =========================================================================
+  // LegacyConnectionStrategy (API 21-28) — WifiConfiguration
+  // =========================================================================
+
+  private fun connectWithLegacy(ssid: String, password: String?, bssid: String?, result: Result) {
+    try {
+      val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+      if (!wifiManager.isWifiEnabled) {
+        result.error("WIFI_DISABLED", "Wi-Fi is disabled", null)
+        return
+      }
+
+      val config = WifiConfiguration().apply {
+        SSID = "\"$ssid\""
+        if (!password.isNullOrEmpty()) {
+          preSharedKey = "\"$password\""
+          allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK)
+        } else {
+          allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE)
+        }
+        if (!bssid.isNullOrEmpty()) {
+          BSSID = bssid
+        }
+      }
+
+      val networkId = wifiManager.addNetwork(config)
+      if (networkId == -1) {
+        result.error("ADD_NETWORK_FAILED", "Failed to add Wi-Fi network", null)
+        return
+      }
+      legacyNetworkId = networkId
+
+      wifiManager.disconnect()
+      wifiManager.enableNetwork(networkId, true)
+
+      val receiverHandled = AtomicBoolean(false)
+
+      val receiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+          if (receiverHandled.get()) return
+          when (intent?.action) {
+            WifiManager.NETWORK_STATE_CHANGED_ACTION -> {
+              val info: NetworkInfo? = intent.getParcelableExtra(WifiManager.EXTRA_NETWORK_INFO)
+              if (info?.isConnected == true) {
+                val connectedSsid = wifiManager.connectionInfo.ssid?.removePrefix("\"")?.removeSuffix("\"")
+                if (connectedSsid == ssid) {
+                  if (receiverHandled.compareAndSet(false, true)) {
+                    unregisterLegacyReceiver()
+                    Handler(Looper.getMainLooper()).post { result.success(true) }
+                  }
+                }
+              }
+            }
+            WifiManager.SUPPLICANT_STATE_CHANGED_ACTION -> {
+              val errorCode = intent.getIntExtra(WifiManager.EXTRA_SUPPLICANT_ERROR, -1)
+              if (errorCode == WifiManager.ERROR_AUTHENTICATING) {
+                if (receiverHandled.compareAndSet(false, true)) {
+                  unregisterLegacyReceiver()
+                  Handler(Looper.getMainLooper()).post { result.error("PROBABLE_WRONG_PASSWORD", "Authentication failed", null) }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      val filter = IntentFilter().apply {
+        addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
+        addAction(WifiManager.SUPPLICANT_STATE_CHANGED_ACTION)
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        context.applicationContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+      } else {
+        context.applicationContext.registerReceiver(receiver, filter)
+      }
+      legacyReceiver = receiver
+
+      // 20 second timeout
+      Handler(Looper.getMainLooper()).postDelayed({
+        if (receiverHandled.compareAndSet(false, true)) {
+          unregisterLegacyReceiver()
+          Handler(Looper.getMainLooper()).post { result.error("TIMEOUT", "Connection attempt timed out", null) }
+        }
+      }, 20_000L)
+
+      wifiManager.reconnect()
+
+    } catch (e: Exception) {
+      Log.e("OpWifiUtils", "Legacy error: $e")
+      Handler(Looper.getMainLooper()).post { result.error("EXCEPTION", "Unexpected error: ${e.localizedMessage}", null) }
+    }
+  }
+
+  private fun unregisterLegacyReceiver() {
+    legacyReceiver?.let {
+      try { context.applicationContext.unregisterReceiver(it) } catch (_: Exception) {}
+      legacyReceiver = null
+    }
+  }
+
+  // =========================================================================
+  // Disconnect
+  // =========================================================================
+
   private fun disconnectFromWifi(ssid: String, result: Result) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      try { connectivityManager?.bindProcessToNetwork(null) } catch (e: Exception) { Log.w("OpWifiUtils", "Failed to unbind: $e") }
+    try {
+      // Specifier cleanup
+      connectivityManager?.bindProcessToNetwork(null)
       activeCallback?.let {
         try { connectivityManager?.unregisterNetworkCallback(it); activeCallback = null } catch (e: Exception) { Log.w("OpWifiUtils", "Error unregistering: $e") }
       }
+      // Legacy cleanup
+      if (legacyNetworkId != -1) {
+        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifiManager.disconnect()
+        wifiManager.disableNetwork(legacyNetworkId)
+        wifiManager.removeNetwork(legacyNetworkId)
+        legacyNetworkId = -1
+      }
+      unregisterLegacyReceiver()
       result.success(true)
-    } else result.error("UNSUPPORTED", "Disconnect only supported on Android 6.0+", null)
+    } catch (e: Exception) {
+      Log.e("OpWifiUtils", "Disconnect error: $e")
+      result.error("EXCEPTION", "Disconnect failed: ${e.localizedMessage}", null)
+    }
   }
 
   private fun getCurrentSsid(result: Result) {
@@ -150,6 +292,7 @@ class OpWifiUtilsPlugin : FlutterPlugin, MethodCallHandler {
         { Handler(Looper.getMainLooper()).post { result.error("LOCATION_DISABLED", "Location disabled", null) }; return }
     }
     val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    @Suppress("DEPRECATION")
     val ssid = wm.connectionInfo.ssid?.removePrefix("\"")?.removeSuffix("\"")
     if (ssid == null || ssid == "<unknown ssid>") Handler(Looper.getMainLooper()).post { result.error("UNKNOWN_CURRENT_SSID", "Unknown SSID", null) }
     else Handler(Looper.getMainLooper()).post { result.success(ssid) }
@@ -158,6 +301,7 @@ class OpWifiUtilsPlugin : FlutterPlugin, MethodCallHandler {
   private fun getCurrentBssid(result: Result) {
     if (!hasWifiPermission()) { Handler(Looper.getMainLooper()).post { result.error("PERMISSION_REQUIRED", "Permission required", null) }; return }
     val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    @Suppress("DEPRECATION")
     val bssid = wm.connectionInfo.bssid
     if (bssid == null || bssid == "00:00:00:00:00:00") Handler(Looper.getMainLooper()).post { result.error("UNKNOWN_CURRENT_BSSID", "Unknown BSSID", null) }
     else Handler(Looper.getMainLooper()).post { result.success(bssid) }

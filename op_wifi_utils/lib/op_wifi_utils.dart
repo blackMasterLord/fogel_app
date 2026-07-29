@@ -7,14 +7,19 @@ import 'package:op_result/op_result.dart';
 /// Keep a few extras for cross-platform parity / future use.
 enum OpWifiUtilsError {
   invalidPassword,
+  probableWrongPassword,
+  notFound,
   invalidSsid,
   ssidMissing,
   alreadyConnected,
   unsupportedPlatform,
   permissionRequired,
   deviceLocationDisabled,
+  wifiDisabled,
   unavailable,
   readyTimeout,
+  timeout,
+  addNetworkFailed,
   neHotspotUnknown,
   osUnknown,
   unknownCurrentSsid,
@@ -46,6 +51,16 @@ class OpWifiUtils {
         return OpWifiUtilsError.deviceLocationDisabled;
       case 'UNAVAILABLE':
         return OpWifiUtilsError.unavailable;
+      case 'NOT_FOUND':
+        return OpWifiUtilsError.notFound;
+      case 'PROBABLE_WRONG_PASSWORD':
+        return OpWifiUtilsError.probableWrongPassword;
+      case 'ADD_NETWORK_FAILED':
+        return OpWifiUtilsError.addNetworkFailed;
+      case 'WIFI_DISABLED':
+        return OpWifiUtilsError.wifiDisabled;
+      case 'TIMEOUT':
+        return OpWifiUtilsError.timeout;
       case 'READY_TIMEOUT':
         return OpWifiUtilsError.readyTimeout;
       case 'NEHOTSPOT_UNKNOWN':
