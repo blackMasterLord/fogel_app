@@ -57,20 +57,20 @@ void main() {
 
   group('SavedDevice', () {
     test('toJson / fromJson roundtrip', () {
-      final device = SavedDevice(address: 'AA:BB:CC:DD:EE:FF', name: 'Fogel Adapter 42', password: 'secret');
+      final device = SavedDevice(address: 'AA:BB:CC:DD:EE:FF', name: 'Fogel Adapter 42', autoConnect: true);
       final json = device.toJson();
       final restored = SavedDevice.fromJson(json);
       expect(restored.address, equals(device.address));
       expect(restored.name, equals(device.name));
-      expect(restored.password, equals(device.password));
+      expect(restored.autoConnect, equals(device.autoConnect));
     });
   });
 
   group('FogelSettings', () {
     test('copyWith preserves unchanged fields', () {
-      final s = FogelSettings(connectionStatus: 'connected', canSpeed: 250);
-      final s2 = s.copyWith(connectionStatus: 'disconnected');
-      expect(s2.connectionStatus, equals('disconnected'));
+      final s = FogelSettings(connectionStatus: FogelConnectionState.connected, canSpeed: 250);
+      final s2 = s.copyWith(connectionStatus: FogelConnectionState.disconnected);
+      expect(s2.connectionStatus, equals(FogelConnectionState.disconnected));
       expect(s2.canSpeed, equals(250));
     });
 
@@ -82,7 +82,7 @@ void main() {
 
     test('default values', () {
       final s = FogelSettings();
-      expect(s.connectionStatus, equals('disconnected'));
+      expect(s.connectionStatus, equals(FogelConnectionState.disconnected));
       expect(s.authAttemptsLeft, equals(5));
       expect(s.themeSetting, equals(AppThemeSetting.system));
     });

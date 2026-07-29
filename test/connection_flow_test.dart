@@ -8,34 +8,34 @@ void main() {
     test('connectionError cleared on successful connect', () {
       var settings = FogelSettings(connectionError: 'old error');
       settings = settings.copyWith(
-        connectionStatus: 'connected',
+        connectionStatus: FogelConnectionState.connected,
         connectionError: null,
       );
       expect(settings.connectionError, isNull);
-      expect(settings.connectionStatus, equals('connected'));
+      expect(settings.connectionStatus, equals(FogelConnectionState.connected));
     });
 
     test('_resetConnectionStatus handles reconnecting', () {
-      final statuses = ['connecting', 'pinging', 'loading_config', 'reconnecting'];
+      final statuses = [FogelConnectionState.connecting, FogelConnectionState.pinging, FogelConnectionState.loadingConfig, FogelConnectionState.reconnecting];
       for (final s in statuses) {
         var settings = FogelSettings(connectionStatus: s);
-        final shouldReset = s == 'connecting' || s == 'pinging' ||
-            s == 'loading_config' || s == 'reconnecting';
+        final shouldReset = s == FogelConnectionState.connecting || s == FogelConnectionState.pinging ||
+            s == FogelConnectionState.loadingConfig || s == FogelConnectionState.reconnecting;
         if (shouldReset) {
-          settings = settings.copyWith(connectionStatus: 'disconnected');
+          settings = settings.copyWith(connectionStatus: FogelConnectionState.disconnected);
         }
-        expect(settings.connectionStatus, equals('disconnected'),
+        expect(settings.connectionStatus, equals(FogelConnectionState.disconnected),
             reason: 'status $s should reset to disconnected');
       }
     });
 
     test('connected and disconnected are NOT reset', () {
-      for (final s in ['connected', 'disconnected']) {
+      for (final s in [FogelConnectionState.connected, FogelConnectionState.disconnected]) {
         final settings = FogelSettings(connectionStatus: s);
-        final shouldReset = settings.connectionStatus == 'connecting' ||
-            settings.connectionStatus == 'pinging' ||
-            settings.connectionStatus == 'loading_config' ||
-            settings.connectionStatus == 'reconnecting';
+        final shouldReset = settings.connectionStatus == FogelConnectionState.connecting ||
+            settings.connectionStatus == FogelConnectionState.pinging ||
+            settings.connectionStatus == FogelConnectionState.loadingConfig ||
+            settings.connectionStatus == FogelConnectionState.reconnecting;
         expect(shouldReset, isFalse, reason: 'status $s should not reset');
       }
     });
@@ -78,15 +78,15 @@ void main() {
 
   group('Pre-flight scan logic', () {
     test('adapter not in range → abort', () {
-      final scanResults = ['AA:BB:CC:DD:EE:01', 'AA:BB:CC:DD:EE:02'];
-      final targetBssid = 'AA:BB:CC:DD:EE:FF';
+      const scanResults = ['AA:BB:CC:DD:EE:01', 'AA:BB:CC:DD:EE:02'];
+      const targetBssid = 'AA:BB:CC:DD:EE:FF';
       final inRange = scanResults.any((bssid) => bssid == targetBssid);
       expect(inRange, isFalse);
     });
 
     test('adapter in range → proceed', () {
-      final scanResults = ['AA:BB:CC:DD:EE:01', 'AA:BB:CC:DD:EE:FF'];
-      final targetBssid = 'AA:BB:CC:DD:EE:FF';
+      const scanResults = ['AA:BB:CC:DD:EE:01', 'AA:BB:CC:DD:EE:FF'];
+      const targetBssid = 'AA:BB:CC:DD:EE:FF';
       final inRange = scanResults.any((bssid) => bssid == targetBssid);
       expect(inRange, isTrue);
     });
